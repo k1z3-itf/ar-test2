@@ -9,10 +9,15 @@
 <!-- A-Frame の VR空間に AR.js を紐づける -->
 <a-scene embedded arjs="debugUIEnabled:true;">
 
+  <a-assets>
+    <a-asset-item id="earth" src="https://arjs-cors-proxy.herokuapp.com/https://raw.githack.com/AR-js-org/AR.js/master/aframe/examples/image-tracking/nft/trex/scene.gltf"></a-asset-item>
+  </a-assets> 
+ 
   <!-- マーカーを登録（デフォルトで設定されている「hiro」マーカー） -->
   <a-marker preset="hiro">
-    <!-- マーカーの場所に立方体を置く -->
-    <a-box position="0 0 0" wireframe="true"></a-box>
+    <!-- マーカーの場所に立方体を置く
+    <a-box position="0 0 0" wireframe="true"></a-box> -->
+    <a-obj-model id="earth-model" gltf-model="#earth" position="0 0 0" scale="1 1 1" rotation="0 0 0"></a-obj-model>
   </a-marker>
 
   <a-entity camera
