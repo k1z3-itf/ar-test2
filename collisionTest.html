@@ -1,0 +1,278 @@
+<html>
+  <head>
+    <script　src="https://cdnjs.cloudflare.com/ajax/libs/three.js/110/three.js">
+    <script　src="https://raw.githack.com/AR-js-org/AR.js/3.3.1/three.js/build/ar.js">
+    <script　src="https://cdn.rawgit.com/mrdoob/three.js/master/examples/js/loaders/GLTFLoader.js">
+  </head>
+
+  <body>
+    <div id="collision-message">...</div>
+    <canvas id="three-canvas"></canvas>
+    <canvas id="col-canvas"></canvas>
+
+    <script　lang="ts">
+    import * as THREE from "three";
+    import { NoToneMapping } from "three";
+    import { GLTFLoader } from "three/examples/jsm/loaders/GLTFLoader";
+
+
+    declare const THREEx: any;
+
+    export default class AR {
+      constructor(){
+        this.init();
+        this.animate();
+      }
+
+      clock:THREE.Clock;
+      scene:THREE.Scene;
+      camera:THREE.Camera;
+
+      renderer: THREE.WebGLRenderer;
+      arToolkitContext: any; // THREEx.ArToolkitContext
+      arToolkitSource: any; // THREEx.ArToolkitSource
+      mixer: THREE.AnimationMixer;
+
+      gearAction: THREE.AnimationAction;
+
+      totalTime: number;
+
+      init() {
+        // clockの初期化
+        this.clock = new THREE.Clock();
+
+        // sceneの初期化
+        this.scene = new THREE.Scene();
+
+        // 環境光を追加
+        const light = new THREE.AmbientLight(0xFFFFFF, 1.0);
+        this.scene.add(light);
+
+        // vameraを初期化し、sceneにcameraを追加
+        //this.camera = new THREE.Camera();
+        this.camera = new THREE.PerspectiveCamera();
+        this.scene.add(this.camera);
+
+        this.totalTime = 0;
+
+        // レンダーの設定
+        this.renderer = new THREE.WebGLRenderer({
+          canvas: <HTMLCanvasElement>document.querySelector('#three-canvas'),
+          antialias : true,
+          alpha: true,
+        });
+
+        this.renderer.setSize(window.innerWidth, window.innerHeight);
+        this.renderer.setClearColor(new THREE.Color('lightgrey'), 0)
+        this.renderer.setPixelRatio(window.devicePixelRatio);
+        this.renderer.outputEncoding = THREE.GammaEncoding;
+
+        /*
+        this.renderer = new THREE.WebGLRenderer({
+          antialias : true,
+          alpha: true
+        });
+        this.renderer.setClearColor(new THREE.Color('lightgrey'), 0)
+        this.renderer.setPixelRatio(window.devicePixelRatio);
+        this.renderer.setSize(window.innerWidth, window.innerHeight); // ウィンドウサイズに合わせたレンダー
+        this.renderer.outputEncoding = THREE.GammaEncoding;
+        this.renderer.domElement.style.position = 'absolute';
+        this.renderer.domElement.style.top = '0px';
+        this.renderer.domElement.style.left = '0px';
+        */
+
+        document.body.appendChild(this.renderer.domElement);
+
+        // === ARを利用するためのカメラのプロファイルを読み込み ===
+        this.arToolkitContext = new THREEx.ArToolkitContext({
+          cameraParametersUrl: '/media-exp-ts/camera_para.dat',
+          // detectionMode: 'mono'
+        }),
+
+        this.arToolkitContext.init(() => {
+          // 射影行列をコピー
+          this.camera.projectionMatrix.copy(this.arToolkitContext.getProjectionMatrix());
+        });
+
+        // リサイズを行う関数
+        let me = this;
+        function handleResize() {
+          me.arToolkitSource.onResize();
+          me.arToolkitSource.copySizeTo(me.renderer.domElement);
+
+          if ( me.arToolkitContext.arController !== null ) {
+            me.arToolkitSource.copySizeTo(me.arToolkitContext.arController.canvas)	
+          }	
+        };
+
+        // webカメラの選択
+        this.arToolkitSource = new THREEx.ArToolkitSource({
+          sourceType : 'webcam',
+          /* 'webcam'(ウェブカメラ), 'image'(画像), 'video'(動画) */
+        })
+
+        // 起動時に自動でリサイズイベントを行う
+        this.arToolkitSource.init(() => {
+          let count:number = 0;
+          const interval = setInterval(() =>{
+            if( ++count > 20 ) clearInterval(interval);
+            handleResize();
+          }, 100)
+        });
+
+        // ウィンドウのサイズが変わったとき、自動でリサイズを行うイベントを追加する
+        window.addEventListener('resize', () => {
+          handleResize();
+        });
+
+        const markerRoot = new THREE.Group;
+        this.scene.add(markerRoot);
+
+
+        // === ARマーカー(Hiro)を追加する ===
+        const arMarkerControls = new THREEx.ArMarkerControls(this.arToolkitContext, markerRoot, {
+          type: 'pattern',
+          patternUrl: '/media-exp-ts/3Dmarker/hiro.patt',
+          changeMatrixMode: 'modelViewMatrix',
+        });
+
+        // 立方体オブジェクトの表示
+        let geometry1	= new THREE.BoxBufferGeometry(1, 1, 1);
+        let material1	= new THREE.MeshNormalMaterial({
+          transparent: false,
+          opacity: 1,
+        });
+
+        let cubeMesh = new THREE.Mesh(geometry1, material1);
+        cubeMesh.position.y = 0.5;
+        cubeMesh
+
+        markerRoot.add(cubeMesh);
+
+        // デバッグ用キャンバスに描画する
+        (<HTMLCanvasElement>document.getElementById("col-canvas")).width = window.innerWidth;
+        (<HTMLCanvasElement>document.getElementById("col-canvas")).height = window.innerHeight;
+        displayCollision();
+
+        // マウスレイに関するイベントの追加
+        document.addEventListener('mousemove', mouseMoveBox, false);
+
+
+
+        function displayCollision() {
+          requestAnimationFrame(displayCollision);
+
+          // デバッグ用キャンバス
+          let dw = window.innerWidth / 8;
+          let dh = window.innerHeight / 8;
+
+          //console.log(dw, dh);
+
+          // ポリゴン描画用キャンバス
+          let cw = parseInt(document.getElementById("three-canvas").style.width, 10);
+          let ch = parseInt(document.getElementById("three-canvas").style.height, 10);
+
+          // canvasを取得
+          let canv = <HTMLCanvasElement> document.getElementById('col-canvas');
+          const context = canv.getContext('2d');
+          context!.clearRect(0, 0, window.innerWidth, window.innerHeight); // キャンバス初期化
+
+          // Raycasterインスタンス作成
+          let raycaster = new THREE.Raycaster();
+
+          for(let j=0; j < dh; j++){
+            for(let i=0; i < dw; i++){
+              let x = (i * 8 / cw) * 2 - 1;
+              let y = -(j * 8 / ch) * 2 + 1;
+
+              x = Math.min(Math.max(x, -1), 1)
+              y = Math.min(Math.max(y, -1), 1)
+
+              // マウス位置を正規化
+              let mouse:THREE.Vector2 = new THREE.Vector2(x, y);
+
+              // 取得したX、Y座標でrayの位置を更新
+              raycaster.setFromCamera(mouse, me.camera);
+
+              // オブジェクトの取得
+              let intersects = raycaster.intersectObjects(me.scene.children, true);
+
+              if(intersects.length > 0){
+                context!.beginPath();
+                context.fillRect(i * 8, j * 8, 8, 8);
+                context.fillStyle = "rgba(255,0,0,0.5)" ;
+                context!.closePath();
+                context!.fill();
+              } else {
+                // none
+              }
+            }
+          }
+        };
+
+
+
+        function mouseMoveBox(event:MouseEvent) {
+          // 画面上
+          let cw = parseInt(document.getElementById("three-canvas").style.width, 10);
+          let ch = parseInt(document.getElementById("three-canvas").style.height, 10);
+          //console.log(cw, ch)
+
+          let x = (event.clientX / cw) * 2 - 1;
+          let y = -(event.clientY / ch) * 2 + 1;
+
+          x = Math.min(Math.max(x, -1), 1)
+          y = Math.min(Math.max(y, -1), 1)
+
+          // マウス位置を正規化
+          let mouse:THREE.Vector2 = new THREE.Vector2(x, y);
+
+          // Raycasterインスタンス作成
+          let raycaster = new THREE.Raycaster();
+
+          // 取得したX、Y座標でrayの位置を更新
+          raycaster.setFromCamera(mouse, me.camera);
+
+          // オブジェクトの取得
+          let intersects = raycaster.intersectObjects(me.scene.children, true);
+
+
+          if(intersects.length > 0){
+            document.getElementById("collision-message").innerHTML = "collision: box (x:" + x + ", y:" + y + ") (cw:" + cw + " ch:" + ch + ")";
+          } else {
+            document.getElementById("collision-message").innerHTML = "collision: none (x:" + x + ", y:" + y + ") (cw:" + cw + " ch:" + ch + ")";
+          }
+        };
+
+
+      }
+
+      update() {
+        if (this.arToolkitSource.ready) {
+          this.arToolkitContext.update(this.arToolkitSource.domElement);
+        }
+      }
+
+      render() {
+        this.renderer.render(this.scene, this.camera);
+      }
+
+      // 画面更新関数(animate)を描画タイミングごとに呼び出し
+      animate() {
+        requestAnimationFrame(this.animate.bind(this));
+        let deltaTime = this.clock.getDelta();
+        this.totalTime += deltaTime;
+        this.update();
+        this.render();
+
+        // gltfアニメーションの更新
+        if(this.mixer != undefined) this.mixer.update(deltaTime);
+      }
+
+
+    }
+
+    let　ar = new　AR();
+    </script>
+  </body>
+</html>
